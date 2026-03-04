@@ -35,9 +35,17 @@ class CartPoleLQRController(Node):
         ])
         
         # LQR cost matrices
-        self.Q = np.diag([1.0, 1.0, 1.0, 1.0])  # State cost
-        self.R = np.array([[1.0]])  # Control cost
-        
+        self.Q = np.diag([15.0, 15.0, 2, 10.0])  # State cost [X,Xdot,Theta,Thetadot]^T
+        self.R = np.array([[0.2]])  # Control cost
+
+        # increase X keeps cart near center but at cost of stability
+        # increase Xdot Damping to keep cart from thrashing
+        # increase theta fights falling over more
+        # increase thetadot adds damping to reduce oscilation
+
+        # Increase R to be a less aggressive force
+        # Decrease R to be a more aggressive force
+
         # Compute LQR gain matrix
         self.K = self.compute_lqr_gain()
         self.get_logger().info(f'LQR Gain Matrix: {self.K}')
@@ -54,6 +62,8 @@ class CartPoleLQRController(Node):
         self.pole_angles = deque()
         self.control_forces = deque()
         self.start_time = None
+        self.earthquake_forces = deque()
+        self._warned_pre_state_earthquake = False
         
         # Create publishers and subscribers
         self.cart_cmd_pub = self.create_publisher(Float64, '/model/cart_pole/joint/cart_to_base/cmd_force', 10)
@@ -61,7 +71,7 @@ class CartPoleLQRController(Node):
         if self.cart_cmd_pub:
             self.get_logger().info('Force command publisher created successfully')
         
-        self.joint_state_sub = self.create_subscription(JointState, '/world/empty/model/cart_pole/joint_state', self.joint_state_callback, 10)
+        self.joint_state_sub = self.create_subscription(JointState, '/joint_states', self.joint_state_callback, 10) # Locks to native ROS stream
         
         self.earthquake_sub = self.create_subscription(Float64, '/earthquake_force', self.earthquake_callback, 10)
         
@@ -98,16 +108,15 @@ class CartPoleLQRController(Node):
                 
         except (ValueError, IndexError) as e:
             self.get_logger().warn(f'Failed to process joint states: {e}, msg={msg.name}')
-
+    
     def earthquake_callback(self, msg):
         """Store earthquake force values."""
-        if not hasattr(self, 'earthquake_forces'):
-            self.earthquake_forces = deque()  # Ensure it's initialized
-
         if self.state_initialized:
             self.earthquake_forces.append(msg.data)
-        else:
+        elif not self._warned_pre_state_earthquake:
             self.get_logger().warn("Received earthquake force before state was initialized.")
+            self._warned_pre_state_earthquake = True
+
 
     def print_metrics(self):
         """Prints performance metrics after simulation ends."""
@@ -116,6 +125,9 @@ class CartPoleLQRController(Node):
         max_pole_deviation = max(map(abs, self.pole_angles), default=0.0)
         avg_control_effort = np.mean(np.abs(self.control_forces)) if self.control_forces else 0.0
         stability_score = max(0, 10 - (max_cart_displacement * 2) - (max_pole_deviation / 5) - (avg_control_effort / 20))
+        rms_cart_error = np.sqrt(np.mean(np.square(self.cart_positions))) if self.cart_positions else 0.0 
+        # RMS takes the cart position relative to the origin and finds its average deviation with larger deviations weighted more heavily
+
 
 
         self.get_logger().info(f"Q values: {self.Q.diagonal()}, R values: {self.R}")
@@ -124,6 +136,7 @@ class CartPoleLQRController(Node):
         self.get_logger().info(f"Maximum pendulum angle deviation: {max_pole_deviation:.3f}°")
         self.get_logger().info(f"Average control effort: {avg_control_effort:.3f} N")
         self.get_logger().info(f"Stability score: {stability_score:.2f}/10")
+        self.get_logger().info(f"RMS Cart Position Error: {rms_cart_error:.3f} m")
 
 
 
