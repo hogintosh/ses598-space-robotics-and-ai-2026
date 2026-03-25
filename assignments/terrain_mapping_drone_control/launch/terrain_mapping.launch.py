@@ -16,25 +16,22 @@ def generate_launch_description():
     # Get paths
     model_path = os.path.join(pkg_share, 'models')
     
+  # Get the package share directory
+    pkg_share = get_package_share_directory('terrain_mapping_drone_control')
+        
     # Set Gazebo model and resource paths
     gz_model_path = os.path.join(pkg_share, 'models')
-    if 'GZ_SIM_MODEL_PATH' in os.environ:
-        os.environ['GZ_SIM_MODEL_PATH'] += os.pathsep + gz_model_path
-    else:
-        os.environ['GZ_SIM_MODEL_PATH'] = gz_model_path
 
-    if 'GZ_SIM_RESOURCE_PATH' in os.environ:
-        os.environ['GZ_SIM_RESOURCE_PATH'] += os.pathsep + gz_model_path
-    else:
-        os.environ['GZ_SIM_RESOURCE_PATH'] = gz_model_path
-
-    # Set initial drone pose
-    os.environ['PX4_GZ_MODEL_POSE'] = '0 0 0.1 0 0 0'
+    # # Set initial drone pose
+    os.environ['PX4_GZ_MODEL_POSE'] = "0,0,0.1,0,0,0"
     
-    # Launch PX4 SITL with x500_gimbal
+    # Add launch argument for PX4-Autopilot path
+    px4_autopilot_path = LaunchConfiguration('px4_autopilot_path')
+    
+    # Launch PX4 SITL with x500_depth
     px4_sitl = ExecuteProcess(
         cmd=['make', 'px4_sitl', 'gz_x500_gimbal'],
-        cwd=os.environ['HOME'] + '/PX4-Autopilot',
+        cwd=px4_autopilot_path,
         output='screen'
     )
     
@@ -54,11 +51,32 @@ def generate_launch_description():
         ],
         output='screen'
     )
+    spawn_terrain = Node(
+        package='ros_gz_sim',
+        executable='create',
+        arguments=[
+            '-file', os.path.join(model_path, 'terrain', 'model.sdf'),
+            '-name', 'terrain',
+            '-x', '0',
+            '-y', '0',
+            '-z', '-1.5',  # 5 meters below ground level
+            '-R', '0',  # Roll (90 degrees)
+            '-P', '0',  # Pitch
+            '-Y', '0'  # Yaw (90 degrees counterclockwise)
+        ],
+        output='screen'
+    )
+
     
     # Wrap cylinder spawning in TimerAction
     delayed_cylinder = TimerAction(
         period=2.0,
         actions=[spawn_cylinder]
+    )
+
+    delayed_terrain = TimerAction(
+        period=2.0,
+        actions=[spawn_terrain]
     )
 
     # Bridge node for camera and odometry
@@ -71,16 +89,19 @@ def generate_launch_description():
         }],
         arguments=[
             # Camera topics (one-way from Gazebo to ROS)
-            '/camera@sensor_msgs/msg/Image[gz.msgs.Image',
-            '/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
+            '/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
+            '/model/x500_gimbal_0/command/gimbal_roll@std_msgs/msg/Float64@gz.msgs.Double',
+            '/model/x500_gimbal_0/command/gimbal_pitch@std_msgs/msg/Float64@gz.msgs.Double',
+            '/model/x500_gimbal_0/command/gimbal_yaw@std_msgs/msg/Float64@gz.msgs.Double',
             # PX4 odometry (one-way from Gazebo to ROS)
             '/model/x500_gimbal_0/odometry_with_covariance@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             # Clock (one-way from Gazebo to ROS)
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
         ],
         remappings=[
-            ('/camera', '/drone_camera'),
-            ('/camera_info', '/drone_camera_info'),
+            ('/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/image', '/drone_camera'),
+            ('/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info', '/drone_camera_info'),
             ('/model/x500_gimbal_0/odometry_with_covariance', '/fmu/out/vehicle_odometry'),
         ],
         output='screen'
@@ -91,8 +112,19 @@ def generate_launch_description():
             'use_sim_time',
             default_value='True',
             description='Use simulation (Gazebo) clock if true'),
+        DeclareLaunchArgument(
+            'px4_autopilot_path',
+            default_value=os.environ.get('HOME', '/home/' + os.environ.get('USER', 'user')) + '/PX4-Autopilot',
+            description='Path to PX4-Autopilot directory'),
         px4_sitl,
-        delayed_cylinder,
+        TimerAction(
+            period=2.0,
+            actions=[delayed_cylinder]
+        ),
+         TimerAction(
+            period=2.0,
+            actions=[delayed_terrain]
+        ),
         TimerAction(
             period=3.0,
             actions=[bridge]

@@ -9,10 +9,18 @@ This ROS2 package implements an autonomous drone system for geological feature d
 Students will develop a controller for a PX4-powered drone to efficiently search, map, and analyze 3D objects in an unknown environment. The drone must map the Perseverance rover, and land on it.
 
 ### Mission Objectives
+Intermediate: 
+1. Search and locate the cylinder
+2. Map the cylinder in 3D
+3. Land safely on top of the cylinder
+
+Advanced (extra credit): 
+Execute intermediate objective, and do the following additional tasks. 
 1. Search and locate the rover
 2. Map the rover in 3D
 3. Land safely on top of the rover
-4. Complete mission while logging time and energy performance. 
+
+In both cases, complete mission while logging time and energy performance. 
 
 ### Evaluation Criteria (100 points)
 
